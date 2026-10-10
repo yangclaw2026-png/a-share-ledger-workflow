@@ -17,7 +17,7 @@ Do a stock analysis where Hermes and OpenCode work independently, then debate th
 disagreements over a fixed number of rounds, ending in concrete operating advice.
 This is the class of task: "你和 opencode 分别分析 XX 这只股票，辩论三轮，给操作建议。"
 
-## 🔴 Execution Discipline (user-mandated 2026-10-06 · highest priority)
+## 🔴 Execution Discipline (highest priority)
 
 **This section outranks everything else in this skill. On conflict, this section wins.**
 
@@ -143,7 +143,7 @@ This is the class of task: "你和 opencode 分别分析 XX 这只股票，辩�
   analysis on a subagent that will not return.
 - **MCP tool calls must be validated with tool_describe before use** when using
   the OpenCode MCP backend.
-- **Price figures drift across sources** (e.g. a 688205 quote of ~173 vs 211.53).
+- **Price figures drift across sources** (e.g. a 600000 quote of ~17 vs 21).
   This is exactly why step 4's cross-check exists — never average conflicting
   prices, pick the dated authoritative source.
 - Do not present a "debate" where both sides say the same thing as a fight; the

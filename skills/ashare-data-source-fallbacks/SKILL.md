@@ -35,7 +35,7 @@ A 股数据接口在高频调用时会**静默限流**（返回空值而非报�
 | 3 | 🔴 **异常处理里不许兜底成旧值或空集合** → 一律显式中止或显式上报 | 返回合法默认值比抛异常危险——下游照常算出错数字并报「正常」 |
 | 4 | 🔴 **过滤器不许静默跳过**：全部纳入 + 显式 `NEED_DATA` 并列出缺哪几项 | 漏配一条 → 标的无声退出监控，叠加静默规则后完全不可见 |
 | 5 | 🔴 **没有「经营现金流同比」字段，必须自算同期金额**（`cf_prev` 按 `REPORT_DATE` 精确匹配同报告期，不能取相邻条）| 误用 `MGJYXJJETZ` 曾一次令 **5 只标的 A1 判定翻转** |
-| 6 | 🔴 **两个接口的过滤字段口径相反**：F10 系 `SECUCODE="300502.SZ"`／估值系 `SECURITY_CODE="300502"` | 传错静默返空，像「这家没财务数据」 |
+| 6 | 🔴 **两个接口的过滤字段口径相反**：F10 系 `SECUCODE="600000.SH"`／估值系 `SECURITY_CODE="600000"` | 传错静默返空，像「这家没财务数据」 |
 | 7 | 🔴 **裸股票代码会静默返回空数据** → 带 `sh`/`sz` 前缀，且写完取数代码先拿一只已知有数据的标的跑通 | 下游 `IndexError` 或错误数值 |
 | 8 | 🔴 **写完检查器必须造坏状态证明它会报**，不能只测好状态 | 正向测试永远会过，分不清「检查在工作」与「检查没执行」 |
 | 9 | 🔴 **bench.json 门槛数据必须是真算出来的实测值，禁填「暂缺」占位**；补完用 `--codes <新代码>` 单跑，把输出与文档判定表逐项对照 | 脚本与台账正文长期说两套话，无任何检查会发现 |
@@ -43,7 +43,7 @@ A 股数据接口在高频调用时会**静默限流**（返回空值而非报�
 | 11 | 🔴 **批量生成多份文件后逐个 resolve 校验相对链接**，从每个文件自身目录算真实路径 | 跨目录 `../` 错一层，只改文件名不动层数＝没修 |
 | 12 | 🔴 **先分清哪些量「能算」哪些「该问」，再决定台账字段**：客观/可从权威数据算出的量一律脚本算（加权成本、持仓期峰值、回撤率），**不要做成让用户手填的字段** | 手填的客观数据随行情变而过期，且混入台账后分不清哪些是行情、哪些是风控边界 —— 用户的原话是「峰值不应该是我持仓以来的日最高值吗」 |
 | 13 | 🔴 **校验器/监控检查要区分「字段缺失」与「字段在但值未设定」**；能从数据算出的字段**不应进「必填值」清单** | 把算得出的量当必填，等于逼用户填本该自动的值 |
-| 14 | 🔴 **从表格单元取数时，数字必须连千分位逗号一起吃完，且单位不同的值不得再二次归一化** | `19,800 股` 被正则只吃 `19` → 渲染「仓位上限 19 股」，少两位还看不出错；再被 `cap/100` 归一化成 `198` → 「已满仓」误判成「还能加 19,602 股」 |
+| 14 | 🔴 **从表格单元取数时，数字必须连千分位逗号一起吃完，且单位不同的值不得再二次归一化** | `10,000 股` 被正则只吃 `10` → 渲染「仓位上限 10 股」，少位数还看不出错；再被 `cap/100` 归一化成 `100` → 「已满仓」误判成「还能加 9,900 股」 |
 | 15 | 🔴 **解析字段名只认整格相等，不要用子串包含匹配** | 字段名「持仓期最高价」会匹配到另一行「盈利保护启动条件」的描述文字 → 读到参考数字当用户设定值 |
 
 ### 二、本技能专属红线
@@ -104,7 +104,7 @@ A 股数据接口在高频调用时会**静默限流**（返回空值而非报�
 
 ## 三、估值分位
 
-✅ 东财 `datacenter-web` `RPT_VALUEANALYSIS_DET`，`pageSize=500` 翻页（`count` 上限 2123 条），`filter=(SECURITY_CODE="300502")`。字段：`PE_TTM`/`PB_MRQ`/`TRADE_DATE`/`TOTAL_MARKET_CAP`。
+✅ 东财 `datacenter-web` `RPT_VALUEANALYSIS_DET`，`pageSize=500` 翻页（`count` 上限 2123 条），`filter=(SECURITY_CODE="600000")`。字段：`PE_TTM`/`PB_MRQ`/`TRADE_DATE`/`TOTAL_MARKET_CAP`。
 
 🔴 **数据起点固定 2018-01-02**：2018 年前上市的标的，上市首年样本不在库内，**「剔上市首年」与「含上市首年」必然算出同一个数**。此时**不得报为「首年检验通过」**，须写「数据源起点限制，未能检验」。
 
@@ -120,9 +120,9 @@ A 股数据接口在高频调用时会**静默限流**（返回空值而非报�
 
 | 用途 | 调用 |
 |---|---|
-| 主要财务指标（多期） | `datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_F10_FINANCE_MAINFINADATA&columns=ALL&filter=(SECUCODE%3D%22300502.SZ%22)&pageNumber=1&pageSize=14&sortColumns=REPORT_DATE&sortTypes=-1` |
-| 上市日期 / 主营 | 同域 `reportName=RPT_F10_BASIC_ORGINFO&filter=(SECUCODE%3D%22300502.SZ%22)` → `LISTING_DATE` / `MAIN_BUSINESS` |
-| ⭐ **主营构成（按产品/地区）** | 同域 `reportName=RPT_F10_FN_MAINOP&columns=ALL&pageSize=60&filter=(SECURITY_CODE%3D%22300033%22)&sortColumns=REPORT_DATE&sortTypes=-1` → `MAINOP_TYPE`（2=按产品）/ `ITEM_NAME` / `MAIN_BUSINESS_INCOME` / `MBI_RATIO` / `GROSS_RPOFIT_RATIO` |
+| 主要财务指标（多期） | `datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_F10_FINANCE_MAINFINADATA&columns=ALL&filter=(SECUCODE%3D%22600000.SH%22)&pageNumber=1&pageSize=14&sortColumns=REPORT_DATE&sortTypes=-1` |
+| 上市日期 / 主营 | 同域 `reportName=RPT_F10_BASIC_ORGINFO&filter=(SECUCODE%3D%22600000.SH%22)` → `LISTING_DATE` / `MAIN_BUSINESS` |
+| ⭐ **主营构成（按产品/地区）** | 同域 `reportName=RPT_F10_FN_MAINOP&columns=ALL&pageSize=60&filter=(SECURITY_CODE%3D%22600001%22)&sortColumns=REPORT_DATE&sortTypes=-1` → `MAINOP_TYPE`（2=按产品）/ `ITEM_NAME` / `MAIN_BUSINESS_INCOME` / `MBI_RATIO` / `GROSS_RPOFIT_RATIO` |
 
 🔴 **同一响应里两个「百分比」字段的单位可能不一样**：主要指标系的 `XSMLL`（毛利率）是**百分数**（`8.23` = 8.23%），而主营构成系的 `MBI_RATIO`（收入占比）与 `GROSS_RPOFIT_RATIO`（毛利率）是**小数**（`0.98` = 98%、`0.082` = 8.2%）。按百分数直接渲染会把 98% 印成「占 1.0%」—— 数字看着合理、错得不明显。
 判据：**占比合计应≈1.0（而不是 100）**；不确定就先把原始值 `print` 出来再格式化。
@@ -140,7 +140,7 @@ cftz = (cf_cur - cf_prev) / abs(cf_prev) * 100
 
 📎 **批量复筛直接用 `scripts/rescreen_candidates.py <代码...>`**：一次算出 PB 全样本分位、PE 近 3 年分位、扣非占归母、A1 与 B3 双口径判定并输出交叉通过清单，无需重写取数逻辑。
 
-🔴 **两套接口的过滤字段口径是反的**：F10 系（MAINFINADATA / BASIC_ORGINFO）必须传 `SECUCODE="300502.SZ"`（带市场后缀）；估值系 `RPT_VALUEANALYSIS_DET` 必须传 `SECURITY_CODE="300502"`（纯代码）。**传错另一个会静默返空**，看起来像“这只股没有财务数据”。
+🔴 **两套接口的过滤字段口径是反的**：F10 系（MAINFINADATA / BASIC_ORGINFO）必须传 `SECUCODE="600000.SH"`（带市场后缀）；估值系 `RPT_VALUEANALYSIS_DET` 必须传 `SECURITY_CODE="600000"`（纯代码）。**传错另一个会静默返空**，看起来像“这只股没有财务数据”。
 
 ⚠️ **A+H 标的的 H 股报价**：`push2.eastmoney.com/api/qt/stock/get?secid=116.{港股代码}`（`f57` 代码 / `f58` 名称 / `f116` 总市值）。🔴 **价格字段 `f43` 的缩放（港股常见 ×1000）必须先与已知报价核对再用**，否则 A/H 溢价会算错。
 
@@ -176,9 +176,9 @@ cftz = (cf_cur - cf_prev) / abs(cf_prev) * 100
 - 多源看似一致时，**回查它们是否指向同一原始出处**；若如此，**当作单一来源**对待。
 - 检索失败时把“未核实到”写清楚，**不要用模糊的二手表述填空**。
 
-## 六、财务指标接口：一个不能用的字段（2026-10-06 实测）
+## 六、财务指标接口：一个不能用的字段
 
-东财 F10 主要指标 `RPT_F10_FINANCE_MAINFINADATA`（filter=`(SECUCODE="002185.SZ")`，sortColumns=REPORT_DATE、sortTypes=-1）可一次取到 A1 全部数据：
+东财 F10 主要指标 `RPT_F10_FINANCE_MAINFINADATA`（filter=`(SECUCODE="600002.SH")`，sortColumns=REPORT_DATE、sortTypes=-1）可一次取到 A1 全部数据：
 
 | 字段 | 含义 |
 |---|---|
@@ -210,7 +210,7 @@ cftz = (cf_cur - cf_prev) / abs(cf_prev) * 100
 
 🔴 **重算 ATR 类阈值（如“成本＋N×ATR”）必须与台账对齐 ATR 算法**：常用两种，结果不同——**Wilder(20)** 与**简单平均 TR**。实测同一标的同一窗口：Wilder → ¥57.58，简单平均 → ¥57.35。**阈值重算先查台账用的是哪个算法**；表里没写就先补上，否则每次重算都偏差一个恒定小额，且误差不随行情收敛。
 
-## 六、⭐ A1 基线过期检测：给门槛脚本加公告扫描（2026-10-06 实现）
+## 六、⭐ A1 基线过期检测：给门槛脚本加公告扫描
 
 **问题**：`candidate_gate.py` 只拉前复权日K，A1 基线与估值分位都写在 `$STOCK_DATA_DIR/bench.json` 里（基准日固定）。财报披露后，每周两次的门槛复查**根本不会发现**（A1 不会变，只有股价波动间接影响 B1/B2/B5）。
 
@@ -232,7 +232,7 @@ REPORT_KEYS  = ("季度报告","三季度","三季报","半年度报告","半年
 
 ---
 
-## 七、🔴 默认参数陷阱：函数默认值在定义时绑定（2026-10-06 实测）
+## 七、🔴 默认参数陷阱：函数默认值在定义时绑定
 
 ```python
 def check_new_reports(code, since=A1_BASE_DATE):   # 🔴 定义时就把值锁死

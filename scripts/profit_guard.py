@@ -168,7 +168,7 @@ def _read_ledger_field(code, keys, want_num=False, want_unit=False):
 
     want_num  → 返回 float（回撤档等纯数值）
     want_unit → 按单位归一化并返回 (数值, 标签)，标签后缀标出单位：
-                「19,800 股」→ (19800.0, "(股)")   股数上限
+                「10,000 股」→ (10000.0, "(股)")   股数上限
                 「140 万元」  → (1400000.0, "(元)") 金额上限（按市值比）
                 「30%」       → (0.30, "(%)")      组合占比
 
@@ -228,12 +228,12 @@ def _read_ledger_field(code, keys, want_num=False, want_unit=False):
             m = re.search(r"\d[\d,]*(?:\.\d+)?", clean)
             if not m:
                 return None, f"「{label}」值无法解析：{val[:40]}"
-            # 🔴 必须连逗号一起吃：台账写「19,800 股」，旧正则 \d+(?:\.\d+)? 只吃 "19"，
+            # 🔴 必须连逗号一起吃：台账写「10,000 股」，旧正则 \d+(?:\.\d+)? 只吃 "19"，
             #    渲染出「仓位上限 19 股」—— 少了两位数还看不出错。
             num = float(m.group().replace(",", ""))
             if want_unit:
                 # 🔴 台账三种写法语义完全不同：
-                #    「19,800 股」→ 股数上限（死的，涨到天上也加不了）
+                #    「10,000 股」→ 股数上限（死的，涨到天上也加不了）
                 #    「140 万元」  → 金额上限（按**市值**比，股价跌了自动腾出空间）
                 #    「30%」       → 组合占比
                 #    万元要 ×10000，否则「140万」被当成 140 元，差 4 个数量级。
@@ -271,7 +271,7 @@ def judge_modules(cost, px, peak, peak_drawdown, loss_warn, loss_stop,
     #    即使现价已跌回成本下方，只要曾有可观浮盈、现在从峰值大幅回落，
     #    就仍然要报 —— 否则「涨过又跌回」这段最该提醒的区间会静默。
     if peak is None:
-        # 峰值现在由脚本从日K自算（2026-10-09），peak_note 携带真实失败原因；
+        # 峰值现在由脚本从日K自算，peak_note 携带真实失败原因；
         # 🔴 别再写「台账未设定」—— 台账里根本没这个字段，那是旧设计的遗留文案。
         out["profit"] = (
             {"status": "NEED_DATA",
@@ -521,7 +521,7 @@ def is_trading_day(now, probe="sh600000"):
     """🔴 改用 trading_day 模块正式判定（探针＝首只持仓代码；无持仓时用默认高流动性探针）。
 
     原实现只判「周一至周五 = 交易日」—— **实测会错**：
-    2026-10-01~10-07 是国庆休市（工作日但不出K线），按粗判全被当成交易日。
+    长假期间（如国庆 10-01~10-07 休市，工作日但不出K线）会被粗判当成交易日。
     影响面：休市日运行会拿旧收盘价当现价做判断，或让用户误以为当天有行情。
 
     返回 (是否交易日, 说明)；判定失败按「非交易日」处理 —— 宁可不判，不错判。
@@ -537,11 +537,11 @@ def is_trading_day(now, probe="sh600000"):
 
 def main():
     ap = argparse.ArgumentParser()
-    # 🔴 2026-10-06：cron 的 no_agent 只能跑 `python3 profit_guard.py`，无法传参。
+    # 🔴 cron 的 no_agent 只能跑 `python3 profit_guard.py`，无法传参。
     # 因此 --slot 必须可选 —— 缺省时按当前时间就近归入 11:20 / 14:40 两个观察点。
     ap.add_argument("--slot", choices=["11:20", "14:40"], default=None,
                     help="留空则按当前时间自动判定（<13:00 → 11:20，否则 14:40）")
-    # 🔴🔴 2026-10-06 安全修复：cron 的 no_agent 只能跑 `python3 profit_guard.py`，
+    # 🔴🔴 安全修复：cron 的 no_agent 只能跑 `python3 profit_guard.py`，
     # **无法传 --no-agent**。若缺省为 False，完整 JSON（含 cost/price/ATR）会进 stdout，
     # 而 no_agent 的 stdout 会被原样投递到飞书 → 持仓数字泄漏。
     # 因此这里默认 True（安全侧），只有显式 --with-json 才输出完整 JSON。
@@ -568,7 +568,7 @@ def main():
         "run_at": now.isoformat(),
         "trading_day": ok_day,
         "day_note": day_note,
-        "threshold_formula": "盈利保护=峰值×(1−回撤档,默认−12%/−20%)｜亏损保护=成本×(1−档位,默认−8%/−15%)｜加仓建议需单股仓位上限（2026-10-09 三模块，取代旧 cost+2×ATR）",
+        "threshold_formula": "盈利保护=峰值×(1−回撤档,默认−12%/−20%)｜亏损保护=成本×(1−档位,默认−8%/−15%)｜加仓建议需单股仓位上限（三模块，取代旧 cost+2×ATR）",
         "forbidden_lines": FORBIDDEN,
         "results": [],
         "anomalies": [],
@@ -642,7 +642,7 @@ def main():
         px = rt["price"]
         exd, exd_note = detect_ex_dividend(kl, atr)
 
-        # 🔴 2026-10-09：三模块判定。
+        # 🔴 三模块判定。
         #    峰值＝脚本从日K自算（持仓以来日最高价，起始日＝台账首次买入日）——
         #    本工作流明确：峰值是客观行情，不由人手填。
         #    🔴 唯一需要你手填的是「你的风控边界」：两档回撤 + 单股仓位上限。
@@ -654,24 +654,24 @@ def main():
                     else f"K线自算：{peak_note}，峰值日 {peak_at}")
         cap, cap_src = _read_ledger_field(code, ("单股仓位上限",), want_num=True,
                                         want_unit=True)
-        # 🔴 台账三种写法：「19,800 股」股数 / 「140 万元」金额 / 「30%」组合占比
+        # 🔴 台账三种写法：「10,000 股」股数 / 「140 万元」金额 / 「30%」组合占比
         cap_unit = ("股" if cap_src.endswith("(股)") else
                     "元" if cap_src.endswith("(元)") else "%")
         loss_warn, _ = _read_ledger_field(code, ("亏损保护预警回撤", "亏损保护预警档"), want_num=True)
         loss_stop, _ = _read_ledger_field(code, ("亏损保护止跌回撤", "亏损保护止跌档"), want_num=True)
         pd1, _ = _read_ledger_field(code, ("盈利保护一档回撤",), want_num=True)
         pd2, _ = _read_ledger_field(code, ("盈利保护二档回撤",), want_num=True)
-        # 档位缺省可用通用值（用户已裁定的默认 −12%/−20%），但缺失会在 JSON 标注
+        # 档位缺省可用通用值（默认 −12%/−20%），但缺失会在 JSON 标注
         PEAK_DD = (pd1 if pd1 else 12.0, pd2 if pd2 else 20.0)
         LOSS_W = loss_warn if loss_warn else 8.0
         LOSS_S = loss_stop if loss_stop else 15.0
-        # 🔴 台账可能写「19,800 股」（已满仓）或「30%」（组合占比）。
+        # 🔴 台账可能写「10,000 股」（已满仓）或「30%」（组合占比）。
         #    _read_ledger_field(want_shares=True) 已按单位分别归一化：
-        #    股 → 原值(19800)、% → 0.30。**这里不要再除 100** ——
-        #    旧写法 cap/100 会把 19800 股变成 198，「已满仓」被误判成「还能加 19602 股」。
+        #    股 → 原值(10000)、% → 0.30。**这里不要再除 100** ——
+        #    旧写法 cap/100 会把 10000 股变成 100，「已满仓」被误判成「还能加 9900 股」。
         cap_w = cap
 
-        # 🔴 2026-10-09：持仓量由台账《交易记录》算（Σ买−Σ卖），不在代码里写死持仓；
+        # 🔴 持仓量由台账《交易记录》算（Σ买−Σ卖），不在代码里写死持仓；
         #    并与台账 §持仓汇总表的「当前持仓数量」交叉核对 —— 不一致说明台账内部打架。
         shares = current_shares(trades)
         if shares is None:

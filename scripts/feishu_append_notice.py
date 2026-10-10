@@ -45,7 +45,7 @@ def doc_title(task_name: str) -> str:
 def extract_body(text: str, src_name: str) -> str:
     """cron 输出文件是**完整对话记录**（含 Prompt 与技能全文）。
 
-    🔴 不能整份灌进云文档 —— 会把提示词、技能正文一起泄到云端（2026-10-09 实测踩到）。
+    🔴 不能整份灌进云文档 —— 会把提示词、技能正文一起泄到云端（实测踩到）。
     只取最后一次 `## Response` 之后的正文；没有该标记则原样返回（调用方应确认）。
     """
     m = list(re.finditer(r"^##\s*Response\s*$", text, re.M))

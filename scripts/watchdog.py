@@ -52,7 +52,7 @@ CHAT = os.environ.get("FEISHU_CHAT_ID", "")     # 告警投递目标（未配置
 
 # 只有这几条关键任务值得盯（no_agent 纯脚本 + 每日核心扫描）。
 # 不监控 LLM 型任务：它们失败通常会自己告警，且响应慢、噪音大。
-# 🔴 2026-10-09 改用 **任务 ID** 匹配，不再用任务全名。
+# 🔴 改用 **任务 ID** 匹配，不再用任务全名。
 #   原按名字匹配有个真 bug：我把两个任务从「盈利保护」改名为「持仓三模块」后，
 #   WATCHED 里的旧名匹配不上 → watchdog 报「找不到该任务」，
 #   而真实故障（脚本不存在）反而被这条噪音盖住了。改名就失联。
@@ -99,7 +99,7 @@ def check():
     jobs = data if isinstance(data, list) else data.get("jobs", [])
     by_name = {j.get("name"): j for j in jobs}
 
-    # 0a) 🔴 全量扫描所有 no_agent 任务：script 文件必须真实存在（2026-10-09 新增）
+    # 0a) 🔴 全量扫描所有 no_agent 任务：script 文件必须真实存在
     #     不依赖 WATCHED 名单 —— 名单外的任务坏掉同样静默（实测抓到 version-watch.sh 缺失）。
     #     只扫启用中的；主动停用的不算故障。
     # 🔴 IGNORE_NOAGENT 按 **任务 ID** 白名单排除（不是名字，改名后仍生效）。
@@ -165,7 +165,7 @@ def check():
                         "msg": f"从未执行过，且已逾期 {overdue_h:.1f} 小时（next_run={job.get('next_run_at')}）",
                     })
         elif lag_min > rule["max_lag_min"]:
-            # 🔴 调度感知（2026-10-10 新增）：下一轮还没到点（周末/休市空隙），不算故障。
+            # 🔴 调度感知（新增）：下一轮还没到点（周末/休市空隙），不算故障。
             #   根因：纯看时间差，周六调休（非交易日）11:20 的 cron 本来就不会跑，
             #   last_run 停在周五，时间差超 24h 即误报。每周一开盘前同理（从上周五算起）。
             #   看 next_run 而不是放宽阈值：调度器真死了 next_run 会变旧（过期），照样报警，不漏真故障。
@@ -213,7 +213,7 @@ def notify(problems):
             {"tag": "hr"},
             {"tag": "div", "fields": [{"is_short": False, "text": {"tag": "lark_md", "content": f"**{p['sev']} {p['task']}**\n{p['msg']}"}} for p in problems]},
             {"tag": "hr"},
-            {"tag": "note", "elements": [{"tag": "lark_md", "content": "由 systemd 独立驱动，不依赖 Hermes 进程。覆盖不了 VM 断电/断网（用户已裁定不补外部探活，此为已知边界）。"}]},
+            {"tag": "note", "elements": [{"tag": "lark_md", "content": "由 systemd 独立驱动，不依赖 Hermes 进程。覆盖不了 VM 断电/断网（已知边界，未补外部探活）。"}]},
         ],
     }
 

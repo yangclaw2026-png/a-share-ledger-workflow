@@ -47,7 +47,7 @@ web_search "<公司名> <代码> 2026年半年度报告 site:static.cninfo.com.c
 |---|---|
 | 公告列表 | 东财 `https://np-anotice-stock.eastmoney.com/api/security/ann?page_size=50&page_index=1&ann_type=A&client_source=web&stock_list={code}`（带 `Referer: https://data.eastmoney.com/`；返回 `notice_date`/`title`/`art_code`）|
 | 公告 PDF | 东财 `https://pdf.dfcfw.com/pdf/H2_{art_code}_1.pdf` |
-| 批量行情 | 新浪 `https://hq.sinajs.cn/list=sh600000,sz300347` |
+| 批量行情 | 新浪 `https://hq.sinajs.cn/list=sh600000,sz600001` |
 
 **东财公告列表的两个要点：**
 

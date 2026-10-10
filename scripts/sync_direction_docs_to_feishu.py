@@ -4,12 +4,12 @@
 
 为什么单独一个脚本：`sync_ledgers_to_feishu.py` 只覆盖
 候选台账 + 流程状态表 + 待办与时点，**不含 方向记录/**，
-于是方向11/方向13 这类研究报告一直不在云端。
+于是这类方向研究报告一直不在云端。
 本脚本补这个缺口，复用前者的 token/api/write_doc（同一套凭证与写法）。
 
 用法：
   python3 sync_direction_docs_to_feishu.py                    # 全部 *.md
-  python3 sync_direction_docs_to_feishu.py 方向13_....md ...  # 只同步指定几份
+  python3 sync_direction_docs_to_feishu.py 方向甲_....md ...  # 只同步指定几份
 """
 import json
 import os

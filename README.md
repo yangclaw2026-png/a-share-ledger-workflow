@@ -66,7 +66,7 @@ python3 scripts/candidate_gate.py --codes 600000 --json-out out.json
 python3 scripts/profit_guard.py --with-json    # 持仓三模块（盈利/亏损/加仓前置）
 python3 scripts/q3_watch.py --json-out $Q3_WATCH_JSON   # Q3 披露监控
 python3 scripts/refresh_a1.py --set 600000:12.5:4.88:30.5  # 模型确认后回写 a1 基线
-python3 scripts/trading_day.py 2026-10-12      # 交易日判定
+python3 scripts/trading_day.py YYYY-MM-DD      # 交易日判定（例：节后首个交易日应返回 ✅）
 ```
 
 ## 5. cron（按需自建，本仓库不带）

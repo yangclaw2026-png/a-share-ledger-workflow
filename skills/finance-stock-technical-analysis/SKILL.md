@@ -9,7 +9,7 @@ description: Use for stock technical work. Create indicator reports.
 
 # Finance Stock Technical Analysis
 
-## 🔴 Execution Discipline (user-mandated 2026-10-06 · highest priority)
+## 🔴 Execution Discipline (highest priority)
 
 **This section outranks everything else in this skill. On conflict, this section wins.**
 
