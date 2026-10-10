@@ -1,0 +1,28 @@
+# ── 数据与凭据（永不入仓）──
+data/
+.env
+*.key
+*.token
+持仓中/
+
+# ── 你的门槛数据：根目录 bench.json 含全部标的明细与估值分位，属私有研究数据 ──
+#   只忽略根目录那份；examples/ 下的虚构示例 bench.json 要入仓（新用户跑通示例用）
+/bench.json
+/bench.json.bak
+__pycache__/
+*.log
+
+# ── 阶段1 实测补充 ──
+*.bak
+*.bak_*
+.feishu_docs.json
+.watchdog_state.json
+.version-watch.state
+归档/
+
+# ── 个人工作材料（一律不入仓）──
+交接_*.md
+投资决策日志.md
+*_交易计划_*.pdf
+*_走势_*.pdf
+快照_*.md
