@@ -463,9 +463,21 @@ def check_status_consistency(ledger_codes):
 # 第 7 项：台账正文 ↔ bench.json 门槛数据 一致性
 #   背景：曾实测发现——字典 BENCH 先填 0.0，台账正文却写 −6.93，
 #        两者不一致且无任何机制拦截。字典是门槛计算的唯一输入，必须与台账对齐。
-#   策略：只校验「能从台账正文正则提取到」的项；提取不到 = 跳过（不误报）。
+#   策略（fail-closed）：
+#     · bench.json 里有的标的，台账**必须**能解析出「相对中位」数值 —— 提不到 = 报错，
+#       不再静默跳过（旧版 `if not hits: continue` 会让 32 只里只有 2 只被真正校验）；
+#     · bench_pt 为 null（方向内无对照）= 台账也不得写数值；
+#     · 台账写了基准起止时，必须与 bench.json 的 bench_base 一致，否则报「基准日不符」
+#       （口径不同 vs 填错，处置方式完全不同）；
+#     · 每次运行回报「实际校验 X / 应有 Y」，跳过必须列名单。
 # ────────────────────────────────────────────────────────────────
 SCRIPTS_DIR = pathlib.Path(__file__).resolve().parent
+
+# 相对中位数值：容忍表格竖线、加粗、全角负号、加号、pt 前后空格
+BENCH_PAT = re.compile(
+    r"相对(?:方向)?中位[^|\n]*?\|?\s*\**\s*([\u2212\u2013\u2014\-\uff0d+]?\s*[\d.]+)\s*pt")
+BASE_START_RE = re.compile(r"(?:基准起点|起点日)\**\s*[：:]?\s*(\d{4}-\d{2}-\d{2})")
+BASE_END_RE = re.compile(r"(?:基准终点|终点日)\**\s*[：:]?\s*(\d{4}-\d{2}-\d{2})")
 # （脚本可放在仓库目录、数据放 $STOCK_DATA_DIR，两者不必同处；用脚本自身目录最稳）
 
 
@@ -495,6 +507,7 @@ def load_gate_dicts():
         return {}
     return {
         "BENCH":      {c: (v.get("direction"), v.get("bench_pt")) for c, v in stock.items()},
+        "BENCH_BASE": data.get("bench_base") or {},
         "PB_PCTL":    {c: v.get("pb_pctl") for c, v in stock.items()},
         "PE_PCTL_3Y": {c: v.get("pe_pctl_3y") for c, v in stock.items()},
         "KF_RATIO":   {c: v.get("kf_ratio") for c, v in stock.items()},
@@ -517,21 +530,26 @@ def nums_near(text, kw, window=45):
 
 
 def check_dict_consistency(files):
-    """台账 ↔ bench.json 门槛数据 一致性。
+    """台账 ↔ bench.json 门槛数据 一致性（fail-closed）。
 
     🔴 只校验 BENCH（方向内相对中位）一项，原因：
        · PB分位 / PE分位 / 扣非占比 在台账里常「全样本」与「剔首年」并列，
          口径差异会被正则误判为不一致（曾实测十余项误报）；
        · bench_pt 是唯一「单一数值、无口径歧义」的项，也正是实际踩过的坑
          （数据先填 0.0，台账正文写 −6.93，两者不一致却无机制拦截）。
-    ⚠️ 台账里提不到 → 跳过（不误报）。
+
+    🔴 提不到数值 = 报错，**不是跳过**。旧版 `if not hits: continue` 会让格式一变
+       就整批静默失效 —— 实测 32 只里只有 2 只被真正校验，却照样输出「✅ 通过」。
+    返回 (errs, cov)：cov 供 main 打印覆盖率，使「实际校验了几只」永远可见。
     """
     dicts = load_gate_dicts()
     bench = dicts.get("BENCH", {})
+    bench_base = dicts.get("BENCH_BASE", {})
     if not bench:
-        return []
-    PAT = re.compile(r"相对(?:方向)?中位\s*\**\s*([\u2212\u2013\u2014\-\+]?\s*[\d.]+)\s*pt")
-    errs = []
+        return [], {}
+    errs, skipped = [], []
+    checked = 0
+    required = sum(1 for v in bench.values() if v[1] is not None)
     for f in files:
         m = re.match(r"(.+?)_(\d{6})_", f.name)
         if not m:
@@ -539,23 +557,61 @@ def check_dict_consistency(files):
         name, code = m.group(1), m.group(2)
         if code not in bench:
             continue
-        want = bench[code][1]
+        label, want = bench[code]
+        t = f.read_text(encoding="utf-8")
+
+        # ── 基准日核对：口径不同 ≠ 填错，分开报 ──
+        wb = bench_base.get(label)
+        if wb:
+            bs, be = BASE_START_RE.search(t), BASE_END_RE.search(t)
+            if bs and be:
+                if (bs.group(1), be.group(1)) != tuple(wb):
+                    errs.append(f"{name}({code}) 基准日不符：台账 "
+                                f"{bs.group(1)}→{be.group(1)}，bench.json {wb[0]}→{wb[1]}"
+                                f"（口径不同，需重算后统一）")
+                    continue
+            else:
+                skipped.append(f"{name}({code})：台账未写基准起止，无法核对基准日"
+                               f"（bench.json 为 {wb[0]}→{wb[1]}）")
+
+        hits = []
+        for mm in BENCH_PAT.finditer(t):
+            try:
+                hits.append(float(mm.group(1).replace("\u2212", "-")
+                                  .replace("\u2013", "-").replace("\u2014", "-")
+                                  .replace("\uff0d", "-").replace(" ", "")))
+            except ValueError:
+                pass
+
+        # ── bench_pt 为 null：无对照，台账不得写数值 ──
+        if want is None:
+            if hits:
+                errs.append(f"{name}({code}) 相对中位：bench.json 标「无对照」(null)，"
+                            f"台账却写有数值 {hits} —— 请把该行改为「不适用」")
+            else:
+                skipped.append(f"{name}({code})：方向内无对照，bench_pt = null")
+            continue
+
         try:
             wv = float(want)
         except (TypeError, ValueError):
             continue
-        t = f.read_text(encoding="utf-8")
-        hits = []
-        for mm in PAT.finditer(t):
-            try:
-                hits.append(float(mm.group(1).replace("−", "-").replace("–", "-").replace("—", "-").replace(" ", "")))
-            except ValueError:
-                pass
+
         if not hits:
-            continue                             # 提不到 → 跳过
-        if not any(abs(h - wv) <= 0.15 for h in hits):
-            errs.append(f"{name}({code}) 相对中位：台账 {hits} 中无 {wv}（字典值）")
-    return errs
+            errs.append(f"{name}({code}) 相对中位：**台账提不到数值**"
+                        f"（缺该行或格式不合规；确属无对照请把 bench_pt 写成 null）")
+            continue
+        checked += 1
+        if any(abs(h - wv) <= 0.15 for h in hits):
+            continue
+        if wv != 0 and all(abs(h) <= 0.15 for h in hits):
+            errs.append(f"{name}({code}) 相对中位：台账为**占位 {hits}**，"
+                        f"bench_pt={wv:+.2f} → 该行未填")
+        else:
+            errs.append(f"{name}({code}) 相对中位：台账 {hits} 中无 {wv:+.2f}"
+                        f"（bench_pt）→ **数值冲突**")
+    cov = {"checked": checked, "required": required, "skipped": skipped}
+    return errs, cov
 
 
 # ────────────────────────────────────────────────────────────────
@@ -1030,7 +1086,7 @@ def main():
         print(f"✅ 流程状态表一致性通过（{len(srows)} 个阶段行、共 {covered} 个代码位，"
               f"与 {len(ledger_codes)} 份台账双向匹配）\n")
     # ── 第 7 项：台账正文 ↔ 字典 一致性 ───────────────────────
-    derrs = check_dict_consistency(files)
+    derrs, dcov = check_dict_consistency(files)
     if derrs:
         print(f"🔴 台账↔字典 一致性：{len(derrs)} 项不一致")
         for e in derrs:
@@ -1038,6 +1094,13 @@ def main():
         print()
     else:
         print("\u2705 台账\u2194\u5b57\u5178一致性通过（BENCH \u65b9\u5411\u5185\u76f8\u5bf9\u4e2d\u4f4d\u53ef\u6bd4\u9879\u5747\u5339\u914d）\n")
+    if dcov:
+        print(f"   ↳ 第7项覆盖率：实际校验 {dcov.get('checked', 0)} / 应有 "
+              f"{dcov.get('required', 0)} 只"
+              + (f"，跳过/豁免 {len(dcov['skipped'])} 只" if dcov.get("skipped") else ""))
+        for s in dcov.get("skipped", []):
+            print(f"      · {s}")
+        print()
 
     # ── 第 8 项：代码 ↔ 名称 绑定（防「张冠李戴」）──────────────
     extra = [STATUS] + sorted((PROJECT / "方向记录").glob("*.md"))

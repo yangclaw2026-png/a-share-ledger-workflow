@@ -61,6 +61,8 @@ cron 不会误报故障）。需要同步才配，不配也能用本地全套。
 
 ```bash
 python3 scripts/validate_ledgers.py            # 台账 12 项校验（含 cron 脚本漂移第12项）
+python3 scripts/rebuild_bench.py              # 从台账排名表重算 bench_pt，与 bench.json 对账（只读）
+python3 scripts/selftest_dict_check.py        # 第7项双向自检（好状态不误报 + 坏状态必报）
 python3 scripts/candidate_gate.py              # 候选门槛复查（A1+A2必过·B1-B5任一触发）
 python3 scripts/candidate_gate.py --codes 600000 --json-out out.json
 python3 scripts/profit_guard.py --with-json    # 持仓三模块（盈利/亏损/加仓前置）
@@ -86,6 +88,18 @@ python3 scripts/trading_day.py YYYY-MM-DD      # 交易日判定（例：节后�
 `ashare-filing-verification`）。
 
 ## 7. 已知行为
+
+🔴 **第7项（台账「相对中位」↔ `bench.json` 的 `bench_pt`）是 fail-closed 的**：
+台账里提不到数值就**报错**，不静默跳过；每次运行还会打印「实际校验 X / 应有 Y」，
+跳过/豁免的标的逐只列出。这么做是因为反面教训真实发生过 —— 旧实现遇到不认识的写法
+直接 `continue`，32 只里只有 2 只被真正校验，输出却仍是「✅ 通过」。
+⭐ 想确认它真的在工作：`python3 scripts/selftest_dict_check.py`（会注入坏状态、
+并回滚旧正则验证覆盖率数字是实测值）。
+⭐ `bench_pt` 不要手填：用 `scripts/rebuild_bench.py` 从台账排名表重算（口径固定为
+「中位=平均」，方向内无对照的标的写 `null`，不要写 0.0 —— 0.0 会被 B4 读成「持平」）。
+`bench_base`（可选）写明每个方向的基准起止，台账写了基准日时会被逐只核对，
+口径不一致会报「基准日不符」，与「数值冲突」分开报。
+
 
 - 无 `bench.json` → 门槛相关项 NEED_DATA/跳过（显式可见，不静默）。
 - 无 cron（无 jobs.json）→ 第 1 项与时点校验跳过，退出码 0，跳过项会列出。

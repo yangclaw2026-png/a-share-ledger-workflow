@@ -1,6 +1,7 @@
 {
   "_说明": [
     "门槛数据文件（示例）。复制到你的数据目录并改名 bench.json：",
+    "  bench_base   可选：{\"方向名\": [\"起点YYYY-MM-DD\",\"终点YYYY-MM-DD\"]}，台账写了基准日时逐只核对",
     "    cp templates/bench.example.json $STOCK_DATA_DIR/bench.json",
     "然后在 stock 里按你的标的逐条填写；本文件里的代码/名称/数值全是虚构的例子，请全部替换。",
     "",
@@ -71,5 +72,11 @@
       "a1_note": "示例：PE 为负 → 分位无意义记 null；扣非占比 85% 未达替代口径门槛",
       "a2_hard": null
     }
+  },
+  "bench_base": {
+    "示例行业甲": [
+      "2026-01-01",
+      "2026-01-02"
+    ]
   }
 }
