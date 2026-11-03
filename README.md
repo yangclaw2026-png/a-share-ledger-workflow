@@ -1,7 +1,7 @@
 # A股台账工作流（a-share-ledger-workflow）
 
 > 8 步 A 股研究流程（方向 → 产业 → 链条 → 筛选 → 跟踪 → 门禁 → 持仓 → 复盘）
-> ＋ 台账规范 ＋ 14 个脚本。零第三方依赖（纯 Python 标准库）。
+> ＋ 台账规范 ＋ 15 个脚本。零第三方依赖（纯 Python 标准库）。
 >
 > ⚠️ 本仓库是**流程与工具**，不含任何持仓/标的/token。投资有风险，
 > 流程只保证"证据可追溯、判定可重算"，不保证收益。详见 `DISCLAIMER.md`。
@@ -65,7 +65,9 @@ python3 scripts/rebuild_bench.py              # 从台账排名表重算 bench_p
 python3 scripts/selftest_dict_check.py        # 第7项双向自检（好状态不误报 + 坏状态必报）
 python3 scripts/candidate_gate.py              # 候选门槛复查（A1+A2必过·B1-B5任一触发）
 python3 scripts/candidate_gate.py --codes 600000 --json-out out.json
-python3 scripts/profit_guard.py --with-json    # 持仓三模块（盈利/亏损/加仓前置）
+# Fetch and validate adjusted daily bars (Eastmoney primary, Tencent fallback)
+python3 scripts/fetch_kline.py 600000 --limit 130 --json
+python3 scripts/profit_guard.py --with-json    # holdings protection + pending Step-7 batch checks
 python3 scripts/q3_watch.py --json-out $Q3_WATCH_JSON   # Q3 披露监控
 python3 scripts/refresh_a1.py --set 600000:12.5:4.88:30.5  # 模型确认后回写 a1 基线
 python3 scripts/trading_day.py YYYY-MM-DD      # 交易日判定（例：节后首个交易日应返回 ✅）
@@ -147,13 +149,17 @@ STOCK_DATA_DIR=/tmp/demo python3 scripts/validate_ledgers.py  # 预期 rc=0 + 2 
 
 - 候选门槛复查（`candidate_gate.py`）：每周 2 次（如周二/周五）。
 - 财报披露跟踪（`q3_watch.py` → `refresh_a1.py --set`）：每天 1 次。
-- 持仓三模块（`profit_guard.py --with-json`，no_agent）：每个交易日盘中 + 尾盘各 1 次。
+- 持仓保护（`profit_guard.py`，no_agent）：每个交易日 11:20 + 14:40。11:20 检查已持仓保护；14:40 同时检查保护与尚未执行的第2/3批。
+- 第6步任务（有标的通过门禁后）：只监控第1批。门禁时先与用户讨论并记录三批条件；首笔实际成交后停第6步任务，由第7步先继承第2/3批条件，再与用户讨论是否调整。
+- 台账记录每批机器规则时，须在对应条件行加入 `batch=2 monitor_rule=B2_MACD_VOL_1_5` 或 `batch=3 monitor_rule=B3_CLOSE_MA60_FLAT_ANTICHASE`。文本条件仍须完整保留；不匹配内置规则时，脚本提示 NEED_CONFIRM，不猜测近似条件。
+- 第3批规则在14:40使用实时价与收盘序列形成MA60快照；此提醒不等同正式收盘确认。规则信号只提醒，不自动买入/卖出。
 - 台账同步（`sync_ledgers_to_feishu.py`，no_agent 零 token）：每周 1 次。
-- 第6步批次盯盘：有标的通过门禁时**克隆模板任务**（平时 `enabled=false`），一股一任务。
 
 ## 10. 已知问题（第三方接口坑）
 
-- 东财 K 线接口偶发拒连 → 脚本重试 3 次仍失败报 `DATA_FAIL`/`FETCH_FAIL`（不按"无数据"处理）。
+- `fetch_kline.py`：Eastmoney 主源 + Tencent 备源；双方数据均经过字段、OHLC、成交量量级与相邻收盘跳变校验，源均失败则明确报错。
+- K线字段/复权序列不一致时停止判断，不按“无信号”处理。
+- `profit_guard.py` 的第2/3批提醒只在14:40运行；连续满足仅提醒一次，条件解除后重新触发才重新提醒。批次规则缺标记或成交基准缺失时报告 NEED_CONFIRM，不静默跳过。
 - `MGJYXJJETZ` 字段名像"经营现金流同比"但不是 → 现金流同比必须用 `NETCASH_OPERATE_PK` 同期金额自算（详见 `ashare-data-source-fallbacks`）。
 - 腾讯 K 线必须带 `sh/sz` 前缀（由代码规则推，`_exchange_pre`）；未知号段跳过并注明。
 - cron 输出文件是完整对话记录（含 prompt 全文）→ `feishu_append_notice.py` 只取最后一次 `## Response` 之后正文；**绝不整份上传**。

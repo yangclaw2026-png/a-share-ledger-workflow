@@ -17,6 +17,7 @@ __pycache__/
 *.bak_*
 .feishu_docs.json
 .watchdog_state.json
+.profit_guard_batch_state.json
 .version-watch.state
 归档/
 

@@ -1,29 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-profit_guard.py — 盈利保护价格观察（Python 前置执行器）
+profit_guard.py — 持仓保护与第7步后续批次监控
 
-用途：在 11:20 / 14:40 两次观察中替代大模型完成机械计算。
-只有「触发」或「异常」时才需要大模型介入。
-
-判定逻辑（与 cron prompt 完全一致，不得偏离）：
-  阈值 = 实际加权成本 + 2 × Wilder ATR(20)
-  触发 = 观察价 ≥ 阈值
-  硬红线：禁止使用或恢复旧版固定价格线 ¥63.17 / ¥47.73
-        禁止 10% 跌幅线；不得自动买卖
-
-除权口径检查（本脚本负责机械部分）：
-  检测 K 线是否存在除权跳变（收盘缺口远超 ATR 范围），是则置 anomaly=ex_dividend
-  由大模型确认是否需要调整成本/价格口径。
-
-用法：
-  python3 profit_guard.py --slot 11:20
-  python3 profit_guard.py --slot 14:40
-输出：JSON 到 /tmp/guard_<slot>_<YYYYMMDD>.json，同时打印摘要
+交易日11:20检查已持仓保护；14:40检查已持仓保护与未执行的第2/3批。
+所有提醒只提供信息，不代表用户买卖决定；脚本不下单。
+行情使用 fetch_kline.py 的 Eastmoney→Tencent 双源、重试与 OHLC 校验。
+台账中用户确认的风控参数缺失时返回 NEED_DATA，不用默认值代替。
 """
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.request
 from datetime import datetime, timezone, timedelta
@@ -117,17 +105,15 @@ def fetch_realtime(pre_code):
 
 
 def fetch_kline(pre_code, n=320):
-    """腾讯前复权日K。必须带市场前缀(sh/sz)。返回 FetchResult。"""
-    def _do():
-        url = (f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
-               f"?param={pre_code},day,,,{n},qfq")
-        k = json.loads(_get(url).decode())
-        kl = k["data"][pre_code].get("qfqday") or k["data"][pre_code].get("day") or []
-        if not kl:
-            raise ValueError("K线列表为空（不足 60 根，无法算 ATR）")
-        return kl
-
-    return fetch_status(_do, tries=2, delay=0.5)
+    """Use the shared Eastmoney→Tencent fetcher with OHLC and volume checks."""
+    try:
+        from fetch_kline import fetch_one
+        code = pre_code[2:] if pre_code.startswith(("sh", "sz")) else pre_code
+        source, bars = fetch_one(code, n)
+        rows = [[b["d"], b["o"], b["c"], b["h"], b["l"], b["v"]] for b in bars]
+        return FetchResult("OK", {"source": source, "bars": rows})
+    except Exception as exc:
+        return FetchResult("FETCH_FAIL", error=f"fetch_kline.py: {type(exc).__name__}: {exc}")
 
 
 def wilder_atr(kl, period=ATR_PERIOD):
@@ -270,7 +256,9 @@ def judge_modules(cost, px, peak, peak_drawdown, loss_warn, loss_stop,
     #    🔴 判定不能只看「现价 vs 成本」。峰值回撤保护的是**浮盈退潮**，
     #    即使现价已跌回成本下方，只要曾有可观浮盈、现在从峰值大幅回落，
     #    就仍然要报 —— 否则「涨过又跌回」这段最该提醒的区间会静默。
-    if peak is None:
+    if peak_drawdown is None or len(peak_drawdown) != 2 or any(v is None or v <= 0 for v in peak_drawdown):
+        out["profit"] = {"status": "NEED_DATA", "reason": "盈利保护回撤档未由用户确认"}
+    elif peak is None:
         # 峰值现在由脚本从日K自算，peak_note 携带真实失败原因；
         # 🔴 别再写「台账未设定」—— 台账里根本没这个字段，那是旧设计的遗留文案。
         out["profit"] = (
@@ -285,12 +273,11 @@ def judge_modules(cost, px, peak, peak_drawdown, loss_warn, loss_stop,
         lines = [round(peak * (1 - peak_drawdown[0] / 100), 2),
                  round(peak * (1 - peak_drawdown[1] / 100), 2)]
         if dd <= -peak_drawdown[1]:
-            st, act = "RED", f"已达二档（峰值 {peak:.2f} → 现价 {px:.2f}，回撤 {dd:.1f}%）→ 建议再减 1/3 仓位"
+            st, act = "RED", "已达盈利保护二档提醒线；是否处置由用户决定"
         elif dd <= -peak_drawdown[0]:
-            st, act = "YELLOW", f"已达一档（峰值 {peak:.2f} → 现价 {px:.2f}，回撤 {dd:.1f}%）→ 建议减 1/3 仓位"
+            st, act = "YELLOW", "已达盈利保护一档提醒线；是否处置由用户决定"
         elif px < cost:
-            st, act = "RED", (f"⚠️ 峰值 {peak:.2f} 回撤 {dd:.1f}% 已吃光浮盈，"
-                    f"现价 {px:.2f} 已低于成本 {cost:.2f}（{pnl_pct:+.1f}%）→ 建议按亏损保护决策")
+            st, act = "RED", "峰值回撤已吃光浮盈且现价低于成本；请用户复核，不构成卖出指令"
         else:
             st, act = "OK", (f"距一档线 {lines[0]:.2f} 还差 "
                     f"{abs(-dd - peak_drawdown[0]):.1f}pt（当前回撤 {dd:.1f}%）")
@@ -300,14 +287,14 @@ def judge_modules(cost, px, peak, peak_drawdown, loss_warn, loss_stop,
         }
 
     # ── 模块二：亏损保护（成本锚）
-    if loss_warn <= 0 or loss_stop <= 0:
-        out["loss"] = {"status": "NEED_DATA", "reason": "台账未设定亏损保护两档"}
+    if loss_warn is None or loss_stop is None or loss_warn <= 0 or loss_stop <= 0:
+        out["loss"] = {"status": "NEED_DATA", "reason": "亏损保护两档未由用户确认"}
     else:
         warn_line, stop_line = cost * (1 - loss_warn / 100), cost * (1 - loss_stop / 100)
         if pnl_pct <= -loss_stop:
-            st, act = "RED", "已跌破止跌线 → 需你决策：①止损减1/2 ②等待（基本面未失效则不动）③加仓（若符合加仓条件且有仓位空间）"
+            st, act = "RED", "已达亏损保护止损提醒线；请用户自行判断并决定，不授权卖出"
         elif pnl_pct <= -loss_warn:
-            st, act = "YELLOW", f"已跌破预警线（{pnl_pct:+.1f}%），再跌 {abs(pnl_pct + loss_stop):.1f}pt 到止跌线 {stop_line:.2f}"
+            st, act = "YELLOW", f"已达亏损保护预警线（{pnl_pct:+.1f}%），距离止损提醒线 {stop_line:.2f}"
         else:
             st, act = "OK", f"距预警线 {warn_line:.2f} 还有 {pnl_pct + loss_warn:.1f}pt（当前 {pnl_pct:+.1f}%）"
         out["loss"] = {
@@ -436,8 +423,10 @@ def read_ledger_trades(code):
         qty = int(mq.group().replace(",", ""))
         if qty <= 0:
             continue
+        batch_match = re.search(r"第([123])批", direction)
         trades.append({"date": md.group(1), "side": side,
-                       "price": float(mp.group()), "qty": qty})
+                       "price": float(mp.group()), "qty": qty,
+                       "batch": int(batch_match.group(1)) if batch_match else None})
 
     if not trades:
         return None, "🔴台账交易记录表无有效成交行"
@@ -535,6 +524,145 @@ def is_trading_day(now, probe="sh600000"):
         return False, f"🔴 交易日判定失败({type(exc).__name__})→ 按非交易日处理"
 
 
+def _ledger_batch_rule(code, name, batch_no):
+    """Read explicit batch metadata from the holding ledger; never guess conditions."""
+    path = ledger_path_for(code, name)
+    try:
+        lines = open(path, encoding="utf-8").read().splitlines()
+    except OSError as exc:
+        return None, "", f"台账不可读：{exc}"
+    for line in lines:
+        if f"batch={batch_no}" not in line:
+            continue
+        m = re.search(r"monitor_rule=([A-Z0-9_]+)", line)
+        if m:
+            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            return m.group(1), (cells[-1] if cells else ""), ""
+    return None, "", f"第{batch_no}批缺机器可读规则标记；须先确认规则后再运行监控"
+
+
+def _ema(values, span):
+    alpha = 2.0 / (span + 1.0)
+    out = [values[0]]
+    for value in values[1:]:
+        out.append(alpha * value + (1 - alpha) * out[-1])
+    return out
+
+
+def _macd_values(closes):
+    if len(closes) < 35:
+        return None
+    diffs = [a - b for a, b in zip(_ema(closes, 12), _ema(closes, 26))]
+    return diffs, _ema(diffs, 9)
+
+
+def _batch_state_path():
+    return os.path.join(_D, ".profit_guard_batch_state.json")
+
+
+def _evaluate_batches(code, name, kl, trades, slot, live_price=None):
+    """Step 7 checks pending batches only at 14:40; alerts never authorize orders."""
+    if slot != "14:40":
+        return []
+    if not kl:
+        return [{"batch": None, "status": "FAULT_ONCE", "reason": "K线不可用"}]
+    alerts = []
+    for batch_no in (2, 3):
+        rule, ledger_status, error = _ledger_batch_rule(code, name, batch_no)
+        if error:
+            alerts.append({"batch": batch_no, "status": "NEED_CONFIRM", "reason": error})
+            continue
+        if any(token in ledger_status for token in ("已成交", "已执行", "已放弃", "风险暂停")):
+            alerts.append({"batch": batch_no, "status": "DONE"})
+            continue
+        if rule == "B2_MACD_VOL_1_5":
+            closes = [float(row[2]) for row in kl]
+            volumes = [float(row[5]) for row in kl]
+            macd = _macd_values(closes)
+            if macd is None or len(volumes) < 21:
+                alerts.append({"batch": batch_no, "status": "NEED_DATA", "reason": "MACD或20日均量样本不足"})
+                continue
+            dif, dea = macd
+            base = sum(volumes[-21:-1]) / 20
+            ratio = volumes[-1] / base if base else 0.0
+            if dif[-2] <= dea[-2] and dif[-1] > dea[-1] and ratio >= 1.5:
+                alerts.append({"batch": batch_no, "status": "REVIEW", "rule": rule,
+                               "dif": round(dif[-1], 5), "dea": round(dea[-1], 5),
+                               "volume_ratio": round(ratio, 3), "bar_date": kl[-1][0],
+                               "note": "MACD事件金叉且量比≥1.5；仅提醒，待用户决定"})
+            else:
+                alerts.append({"batch": batch_no, "status": "SILENT"})
+        elif rule == "B3_CLOSE_MA60_FLAT_ANTICHASE":
+            if len(kl) < 61 or live_price is None:
+                alerts.append({"batch": batch_no, "status": "NEED_DATA", "reason": "MA60样本或14:40实时价缺失"})
+                continue
+            closes = [float(row[2]) for row in kl]
+            today = datetime.now(TZ).date().isoformat()
+            prior = closes[:-1] if str(kl[-1][0])[:10] == today else closes
+            if len(prior) < 60:
+                alerts.append({"batch": batch_no, "status": "NEED_DATA", "reason": "当日MA60有效样本不足"})
+                continue
+            ma_now = (sum(prior[-59:]) + float(live_price)) / 60
+            ma_prev = sum(prior[-60:]) / 60
+            price = float(live_price)
+            if price >= ma_now and ma_now >= ma_prev:
+                buys = [trade for trade in (trades or []) if trade["side"] == "买入"]
+                b2 = [trade for trade in buys if trade.get("batch") == 2]
+                b1 = [trade for trade in buys if trade.get("batch") == 1]
+                base_trades = b2 or b1
+                if not base_trades:
+                    alerts.append({"batch": batch_no, "status": "NEED_CONFIRM", "rule": rule,
+                                   "reason": "防追高基准缺失：交易记录须标注所属批次"})
+                    continue
+                baseline = sum(t["price"] * t["qty"] for t in base_trades) / sum(t["qty"] for t in base_trades)
+                gain = (price / baseline - 1) * 100
+                if gain > 25:
+                    action = "预设防追高分档为跳过（保留现金）；是否继续等待由用户决定"
+                elif gain > 15:
+                    action = "预设防追高分档为半额；是否执行由用户决定"
+                else:
+                    action = "预设防追高分档为全额；是否执行由用户决定"
+                alerts.append({"batch": batch_no, "status": "REVIEW", "rule": rule,
+                               "price": round(price, 3), "ma60": round(ma_now, 3),
+                               "ma60_prev": round(ma_prev, 3), "gain_pct": round(gain, 2),
+                               "baseline": round(baseline, 3), "bar_date": kl[-1][0],
+                               "note": action})
+            else:
+                alerts.append({"batch": batch_no, "status": "SILENT"})
+        else:
+            alerts.append({"batch": batch_no, "status": "NEED_CONFIRM", "rule": rule,
+                           "reason": "规则标记未支持；不按近似条件判定"})
+    return alerts
+
+
+def _dedupe_batch_alerts(code, alerts):
+    """Alert each continuously true rule once; re-arm after it becomes false."""
+    path = _batch_state_path()
+    try:
+        state = json.loads(open(path, encoding="utf-8").read())
+        if not isinstance(state, dict):
+            state = {}
+    except (OSError, ValueError):
+        state = {}
+    output = []
+    for alert in alerts:
+        batch = alert.get("batch")
+        key = f"{code}:{batch}"
+        if alert.get("status") == "REVIEW":
+            if key not in state:
+                state[key] = datetime.now(TZ).date().isoformat()
+                output.append(alert)
+        else:
+            if batch is not None and alert.get("status") not in ("NEED_CONFIRM", "NEED_DATA", "FAULT_ONCE"):
+                state.pop(key, None)
+            output.append(alert)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+    return output
+
+
 def main():
     ap = argparse.ArgumentParser()
     # 🔴 cron 的 no_agent 只能跑 `python3 profit_guard.py`，无法传参。
@@ -568,9 +696,10 @@ def main():
         "run_at": now.isoformat(),
         "trading_day": ok_day,
         "day_note": day_note,
-        "threshold_formula": "盈利保护=峰值×(1−回撤档,默认−12%/−20%)｜亏损保护=成本×(1−档位,默认−8%/−15%)｜加仓建议需单股仓位上限（三模块，取代旧 cost+2×ATR）",
+        "threshold_formula": "盈利保护=持仓期峰值×(1−用户确认回撤档)｜亏损保护=加权成本×(1−用户确认回撤档)｜缺少用户参数时 NEED_DATA，不回落默认值",
         "forbidden_lines": FORBIDDEN,
         "results": [],
+        "batch_alerts": [],
         "anomalies": [],
         "action": "SILENT",
         "reason": "",
@@ -588,7 +717,7 @@ def main():
         result["reason"] = "持仓目录为空（无持仓台账），无标的可监控"
         _emit(result, args.json_out)
         return
-    for code, _name in holdings:
+    for code, name in holdings:
         pre = _exchange_pre(code)
         if not pre:
             result.setdefault("skipped", []).append(f"{code}：未知号段，无法确定交易所前缀，已跳过")
@@ -600,10 +729,26 @@ def main():
         rt_r = fetch_realtime(pre_code)
         kl_r = fetch_kline(pre_code)
         rt = rt_r.value if rt_r.ok else None
-        kl = kl_r.value if kl_r.ok else None
+        kline_payload = kl_r.value if kl_r.ok else None
+        kl = kline_payload["bars"] if kline_payload else None
+        kline_source = kline_payload["source"] if kline_payload else None
+
+        batch_alerts = _evaluate_batches(
+            code, name, kl, trades, result["slot"],
+            live_price=(rt.get("price") if rt else None))
+        batch_alerts = _dedupe_batch_alerts(code, batch_alerts)
+        for alert in batch_alerts:
+            alert["kline_source"] = kline_source
+            alert["checked_at"] = rt.get("time") if rt else result["run_at"]
+        result["batch_alerts"].append({"code": code, "name": name, "alerts": batch_alerts})
+        for alert in batch_alerts:
+            if alert["status"] not in ("SILENT", "DONE"):
+                result["anomalies"].append(
+                    f"{name} {code}【第{alert.get('batch') or '?'}批买入监控】"
+                    f"{alert['status']}｜{alert.get('note') or alert.get('reason') or ''}")
 
         item = {
-            "code": code, "name": cfg["name"],
+            "code": code, "name": name,
             "cost": cost, "cost_source": cost_src,
             "_kl": kl,
         }
@@ -614,21 +759,21 @@ def main():
             item["detail"] = f"成本不可得：{cost_src}"
             result["results"].append(item)
             result["anomalies"].append(
-                f"{cfg['name']} {code} 成本读取失败（{cost_src}）→ 阈值无法计算")
+                f"{name} {code} 成本读取失败（{cost_src}）→ 阈值无法计算")
             continue
 
         if rt_r.failed:
             item["status"] = "data_failed"
             item["detail"] = f"实时行情取数失败：{rt_r.error}"
             result["results"].append(item)
-            result["anomalies"].append(f"{cfg['name']} {code} 实时价获取失败")
+            result["anomalies"].append(f"{name} {code} 实时价获取失败")
             continue
 
         if kl_r.failed:
             item["status"] = "data_failed"
             item["detail"] = f"K线取数失败：{kl_r.error}"
             result["results"].append(item)
-            result["anomalies"].append(f"{cfg['name']} {code} K线获取失败")
+            result["anomalies"].append(f"{name} {code} K线获取失败")
             continue
 
         atr = wilder_atr(kl)
@@ -636,7 +781,7 @@ def main():
             item["status"] = "data_failed"
             item["detail"] = "atr_insufficient_klines"
             result["results"].append(item)
-            result["anomalies"].append(f"{cfg['name']} {code} K线不足，ATR无法计算")
+            result["anomalies"].append(f"{name} {code} K线不足，ATR无法计算")
             continue
 
         px = rt["price"]
@@ -661,10 +806,10 @@ def main():
         loss_stop, _ = _read_ledger_field(code, ("亏损保护止跌回撤", "亏损保护止跌档"), want_num=True)
         pd1, _ = _read_ledger_field(code, ("盈利保护一档回撤",), want_num=True)
         pd2, _ = _read_ledger_field(code, ("盈利保护二档回撤",), want_num=True)
-        # 档位缺省可用通用值（默认 −12%/−20%），但缺失会在 JSON 标注
-        PEAK_DD = (pd1 if pd1 else 12.0, pd2 if pd2 else 20.0)
-        LOSS_W = loss_warn if loss_warn else 8.0
-        LOSS_S = loss_stop if loss_stop else 15.0
+        # Parameters are user risk boundaries: missing values must fail closed, never default.
+        PEAK_DD = (pd1, pd2)
+        LOSS_W = loss_warn
+        LOSS_S = loss_stop
         # 🔴 台账可能写「10,000 股」（已满仓）或「30%」（组合占比）。
         #    _read_ledger_field(want_shares=True) 已按单位分别归一化：
         #    股 → 原值(10000)、% → 0.30。**这里不要再除 100** ——
@@ -676,12 +821,12 @@ def main():
         shares = current_shares(trades)
         if shares is None:
             result["anomalies"].append(
-                f"🔴 {cfg['name']} {code} 台账无交易记录，持仓量算不出（模块三将报 NEED_DATA）")
+                f"🔴 {name} {code} 台账无交易记录，持仓量算不出（模块三将报 NEED_DATA）")
         else:
             led_sh, _ = _read_ledger_field(code, ("当前持仓数量",), want_num=True)
             if led_sh is not None and abs(shares - led_sh) > 0.5:
                 result["anomalies"].append(
-                    f"🔴 {cfg['name']} {code} 台账自相矛盾：《交易记录》算出 {shares:,.0f} 股，"
+                    f"🔴 {name} {code} 台账自相矛盾：《交易记录》算出 {shares:,.0f} 股，"
                     f"§持仓汇总写 {led_sh:,.0f} 股 —— 需人工核对")
 
         mods = judge_modules(cost, px, peak, PEAK_DD, LOSS_W, LOSS_S, cap_w,
@@ -718,13 +863,13 @@ def main():
 
         if exd:
             result["anomalies"].append(
-                f"{cfg['name']} {code}疑似除权/送转：{exd_note} — 需大模型确认成本/价格口径是否需调整")
+                f"{name} {code}疑似除权/送转：{exd_note} — 需大模型确认成本/价格口径是否需调整")
         for key, label in (("profit", "盈利保护"), ("loss", "亏损保护"), ("add", "加仓前置")):
             m = mods.get(key, {})
             if m.get("status") in ("YELLOW", "RED"):
-                result["anomalies"].append(f"{cfg['name']} {code}【{label}】{m.get('status')}｜{m.get('suggest')}")
+                result["anomalies"].append(f"{name} {code}【{label}】{m.get('status')}｜{m.get('suggest')}")
             elif m.get("status") == "NEED_DATA":
-                result["anomalies"].append(f"{cfg['name']} {code}【{label}】缺参数：{m.get('reason')}")
+                result["anomalies"].append(f"{name} {code}【{label}】缺参数：{m.get('reason')}")
 
     # 决定是否需要大模型
     # 🔴 优先级：全部失败 → FAULT_ONCE（按规则只报一次简讯，避免重复报同一故障）
@@ -733,16 +878,20 @@ def main():
     failed = [r for r in result["results"] if r.get("status") == "data_failed"]
     triggered = [r for r in valid if r.get("triggered")]
 
-    if not valid and failed:
-        # 全部标的行情不可得 → 不报告触发（prompt 红线：任一关键数据无法验证时不得报告触发）
+    batch_notices = [a for g in result.get("batch_alerts", []) for a in g.get("alerts", [])
+                    if a.get("status") in ("REVIEW", "NEED_CONFIRM", "NEED_DATA", "FAULT_ONCE")]
+    if batch_notices:
+        result["action"] = "FAULT_ONCE" if all(a.get("status") == "FAULT_ONCE" for a in batch_notices) else "REVIEW"
+        result["reason"] = "第7步后续批次监控需要提醒或人工核验"
+    elif not valid and failed:
         result["action"] = "FAULT_ONCE"
         result["reason"] = "全部标的行情/ATR获取失败 → 不得报告触发；按规则报一次简讯，避免重复报同一故障"
     elif result["anomalies"]:
         result["action"] = "REVIEW"
-        result["reason"] = "触发或存在异常，需大模型复核后决定是否通知"
+        result["reason"] = "触发或存在异常，需复核后决定是否通知"
     else:
         result["action"] = "SILENT"
-        result["reason"] = "三模块均未触发且数据有效 → 按规则静默（不发送行情摘要）"
+        result["reason"] = "三模块与后续批次条件均未触发，且数据有效 → 静默"
 
     _emit(result, args.json_out)
 
@@ -763,14 +912,17 @@ def _render_for_delivery(result, with_numbers=True):
     act = result.get("action")
     if act == "SILENT":
         return ""
-    L = [f"**持仓三模块监控 · {result.get('slot')} · {result.get('run_at','')[:10]}**", ""]
+    L = [f"**第7步持仓与分批监控 · {result.get('slot')} · {result.get('run_at','')[:10]}**", ""]
     n = with_numbers
 
     if act == "FAULT_ONCE":
         L += ["⚠️ 本次无法确认持仓保护状态（行情或数据获取异常）。", "",
-              f"原因：{result.get('reason','')}", "",
-              "🔴 按规则：**数据不可验证时不报告触发**，也不做任何推断。",
-              "请人工核对，或等我下次运行。"]
+              f"原因：{result.get('reason','')}", ""]
+        for group in result.get("batch_alerts", []):
+            for alert in group.get("alerts", []):
+                if alert.get("status") not in ("SILENT", "DONE"):
+                    L.append(f"- {group.get('name')}（{group.get('code')}）第{alert.get('batch') or '?'}批：{alert.get('reason') or alert.get('note') or alert['status']}")
+        L += ["", "🔴 数据不可验证时不报告买入触发，不做推断。"]
         return "\n".join(L)
 
     trig = [r for r in result.get("results", []) if r.get("triggered")]
@@ -862,6 +1014,23 @@ def _render_for_delivery(result, with_numbers=True):
         src = r.get("cost_source")
         if n and src and src not in (detail or ""):
             L.append(f"- 成本来源：{src}")
+
+    for group in result.get("batch_alerts", []):
+        for alert in group.get("alerts", []):
+            if alert.get("status") in ("SILENT", "DONE"):
+                continue
+            L += [f"**{group.get('name')}（{group.get('code')}）｜第{alert.get('batch') or '?'}批买入监控：{alert['status']}**"]
+            if alert.get("rule"):
+                L.append(f"- 规则：`{alert['rule']}`")
+            if alert.get("kline_source"):
+                L.append(f"- K线来源：{alert['kline_source']}｜判定时点：{alert.get('checked_at') or '—'}｜日K：{alert.get('bar_date') or '—'}")
+            metrics = [f"{key}={alert[key]}" for key in ("dif", "dea", "volume_ratio", "price", "ma60", "ma60_prev", "gain_pct", "baseline") if key in alert]
+            if metrics:
+                L.append("- 核验值：" + "；".join(metrics))
+            if alert.get("note") or alert.get("reason"):
+                L.append("- " + str(alert.get("note") or alert.get("reason")))
+            L.append("- 仅提醒；是否继续、调整或执行由用户决定，不自动买入。")
+            L.append("")
 
     if result.get("anomalies") and not (trig or sus or failed):
         L += ["⚠️ 检测到数据异常，需复核：", ""]
