@@ -1,27 +1,73 @@
 # A股台账工作流（a-share-ledger-workflow）
 
-> 8 步 A 股研究流程（方向 → 产业 → 链条 → 筛选 → 跟踪 → 门禁 → 持仓 → 复盘）
-> ＋ 台账规范 ＋ 15 个脚本。零第三方依赖（纯 Python 标准库）。
->
+[![ClawHub](https://img.shields.io/badge/ClawHub-a--share--ledger--workflow-2f6f4e)](https://clawhub.ai/yangclaw2026-png/skills/a-share-ledger-workflow)
+[![skills.sh](https://skills.sh/b/yangclaw2026-png/a-share-ledger-workflow)](https://skills.sh/yangclaw2026-png/a-share-ledger-workflow)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+8 步 A 股研究流程（方向 → 产业 → 链条 → 筛选 → 跟踪 → 门禁 → 持仓 → 复盘）
+＋ 台账规范 ＋ 15 个脚本。零第三方依赖（纯 Python 标准库）。
+
+**30 秒试跑**（隔离目录，不碰你的数据）：
+
+```bash
+git clone https://github.com/yangclaw2026-png/a-share-ledger-workflow && cd a-share-ledger-workflow
+./demo.sh
+```
+
+预期：模板自检 9/9 通过、`rc=0`，另有两项「环境未配置」的跳过提示（新用户本就如此）。
+
+**装进 agent**：
+
+```bash
+openclaw skills install @yangclaw2026-png/a-share-ledger-workflow   # OpenClaw / ClawHub
+hermes skills install a-share-ledger-workflow                       # Hermes
+npx skills add yangclaw2026-png/a-share-ledger-workflow             # skills.sh / Claude Code / Cursor
+```
+
+**开始管自己的数据**：`export STOCK_DATA_DIR=~/stock_data && ./init.sh`
+
 > ⚠️ 本仓库是**流程与工具**，不含任何持仓/标的/token。投资有风险，
 > 流程只保证"证据可追溯、判定可重算"，不保证收益。详见 `DISCLAIMER.md`。
+
+## English
+
+An 8-step A-share (China mainland equity) research workflow for AI agents:
+direction → industry → value chain → screening → tracking → pre-buy gate →
+position ledger → post-trade review, plus a ledger standard and 15 stdlib-only
+Python scripts. No third-party dependencies, no data, no tokens — you point it
+at your own `$STOCK_DATA_DIR`.
+
+```bash
+git clone https://github.com/yangclaw2026-png/a-share-ledger-workflow && cd a-share-ledger-workflow
+./demo.sh                     # runs the bundled sample in a temp dir
+export STOCK_DATA_DIR=~/stock_data && ./init.sh   # scaffold your own data dir
+```
+
+Install: `hermes skills install a-share-ledger-workflow` ·
+`openclaw skills install @yangclaw2026-png/a-share-ledger-workflow` ·
+`npx skills add yangclaw2026-png/a-share-ledger-workflow`
+
+**Scope:** workflow and tooling only. It never places orders, never picks
+stocks for you, and makes no return claims. See `DISCLAIMER.md`.
+
+---
 
 ## 1. 快速开始
 
 ```bash
-# ① 准备数据目录（结构见第 2 节）
+# ① 初始化数据目录（骨架 + 模板，不覆盖已有文件）
 export STOCK_DATA_DIR="$HOME/stock_data"
+./init.sh
 
-# ② 门槛数据：复制模板并按你的标的填写
-cp templates/bench.example.json $STOCK_DATA_DIR/bench.json
-# 字段说明见模板顶部注释（每只标的 7 项：direction/bench_pt/pb_pctl/
-# pe_pctl_3y/kf_ratio/a1/a1_note；constants 含判定阈值与 a1_base_date）
+# ② 填门槛数据：bench.json 已由 init.sh 拷好，按你的标的改 7 项字段
+#    字段说明见 templates/bench.example.json 顶部注释
 
 # ③ 自检（无飞书/无 Hermes 也能跑，缺的项会显式"跳过"）
 python3 scripts/validate_ledgers.py
 
 # ④ 跑通示例（隔离目录，不碰你的真实数据；含破坏测试）
-# 步骤见 examples/sample_direction/README.md（预期 rc=0 + 2 项跳过提示）
+./demo.sh
+# 破坏测试步骤见 examples/sample_direction/README.md
 ```
 
 ## 2. 数据目录约定（`$STOCK_DATA_DIR`）
@@ -126,12 +172,10 @@ cp scripts/*.py $HERMES_HOME/scripts/
 # ④ 零依赖（无需 pip install；requirements.txt 为空说明）
 python3 -c "import sys; print(sys.version)"
 
-# ⑤ 数据目录 + 示例验证（隔离目录）
+# ⑤ 数据目录 + 示例验证
 export STOCK_DATA_DIR="$HOME/stock_data"
-cp templates/bench.example.json $STOCK_DATA_DIR/bench.json   # 后按你的标的填写
-rm -rf /tmp/demo && mkdir -p /tmp/demo
-cp -r examples/sample_direction/* /tmp/demo/
-STOCK_DATA_DIR=/tmp/demo python3 scripts/validate_ledgers.py  # 预期 rc=0 + 2 项跳过提示
+./init.sh        # 建目录骨架 + 拷模板（不覆盖已有文件）
+./demo.sh        # 隔离目录跑通示例，预期 rc=0 + 2 项跳过提示
 ```
 
 外部脚本（可选依赖，不装则对应功能跳过，不报错）：
