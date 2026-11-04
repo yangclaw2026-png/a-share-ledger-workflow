@@ -23,6 +23,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sync_ledgers_to_feishu import (INDEX, WRITER, api, load_index, token)  # noqa: E402
@@ -115,7 +116,7 @@ def main() -> None:
 
     from datetime import date
     stamp = date.today().isoformat()
-    tmp = pathlib.Path(f"/tmp/notice_{stamp}.md")
+    tmp = pathlib.Path(tempfile.gettempdir()) / f"notice_{stamp}.md"
     tmp.write_text(body, encoding="utf-8")
     cmd = ["python3", WRITER, str(tmp), "--doc", doc,
            "--title", f"{title} · {stamp}"]

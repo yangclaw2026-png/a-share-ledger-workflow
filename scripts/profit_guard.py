@@ -13,6 +13,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import urllib.request
 from datetime import datetime, timezone, timedelta
 
@@ -1064,7 +1065,8 @@ def _send_mail(result, rendered, mail_to=None):
               f"，本次跳过邮件", file=sys.stderr)
         return
     body = rendered + f"\n\n---\n判定口径：{result.get('threshold_formula','')}\n"
-    f = f"/tmp/guard_mail_{result.get('slot','').replace(':','')}_{datetime.now(TZ):%Y%m%d_%H%M%S}.md"
+    f = os.path.join(tempfile.gettempdir(),
+                     f"guard_mail_{result.get('slot','').replace(':','')}_{datetime.now(TZ):%Y%m%d_%H%M%S}.md")
     try:
         with open(f, "w", encoding="utf-8") as fh:
             fh.write(body)
@@ -1088,7 +1090,8 @@ def _send_mail(result, rendered, mail_to=None):
 
 def _emit(result, json_out=None):
     now = datetime.now(TZ)
-    default = f"/tmp/guard_{result['slot'].replace(':','')}_{now.strftime('%Y%m%d')}.json"
+    default = os.path.join(tempfile.gettempdir(),
+                           f"guard_{result['slot'].replace(':','')}_{now.strftime('%Y%m%d')}.json")
     out = json_out or default
     try:
         with open(out, "w", encoding="utf-8") as f:

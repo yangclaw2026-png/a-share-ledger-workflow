@@ -42,6 +42,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -60,7 +61,7 @@ if not _D:
 BENCH_FILE = os.path.join(_D, "bench.json")
 GATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "candidate_gate.py")
 # ⚠️ GATE 仅供 --check 的旧引用保留；A1 数据已不在该文件里（在 bench.json）
-WATCH_JSON = os.environ.get("Q3_WATCH_JSON", "/tmp/q3_watch.json")
+WATCH_JSON = os.environ.get("Q3_WATCH_JSON", os.path.join(tempfile.gettempdir(), "q3_watch.json"))
 # （q3_watch.py 跑完用 --json-out 写到同一路径；两边用环境变量 Q3_WATCH_JSON 保持一致）
 
 NUM = r"(-?[\d,]+\.?\d*)"
@@ -413,7 +414,8 @@ def main():
     for r in disclosed:
         code, name = r["code"], r["name"]
         url = r.get("pdf_url")
-        pdf, txt = f"/tmp/a1_{code}.pdf", f"/tmp/a1_{code}.txt"
+        pdf = os.path.join(tempfile.gettempdir(), f"a1_{code}.pdf")
+        txt = os.path.join(tempfile.gettempdir(), f"a1_{code}.txt")
         if not url:
             print(f"  ⏭ {name}({code}) 无 PDF 直链\n")
             unreadable.append(f"{name}({code}) 无 PDF 直链")

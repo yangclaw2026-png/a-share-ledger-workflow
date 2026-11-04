@@ -30,6 +30,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 # ── 数据根目录（环境变量；未设置即报错，不回落任何具体路径）──────────────
@@ -497,7 +498,7 @@ def main():
               f"⚠️ 需补数据 {sum(1 for r in results if r['action']=='NEED_DATA')}｜"
               f"📄 基线过期 {len(out['report_alerts'])}")
 
-    js = args.json_out or f"/tmp/candidate_gate_{time.strftime('%Y%m%d')}.json"
+    js = args.json_out or os.path.join(tempfile.gettempdir(), f"candidate_gate_{time.strftime('%Y%m%d')}.json")
     try:
         with open(js, "w", encoding="utf-8") as f:
             json.dump(out, f, ensure_ascii=False, indent=2, default=str)
