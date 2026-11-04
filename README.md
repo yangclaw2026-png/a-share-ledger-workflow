@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 8 步 A 股研究流程（方向 → 产业 → 链条 → 筛选 → 跟踪 → 门禁 → 持仓 → 复盘）
-＋ 台账规范 ＋ 15 个脚本。零第三方依赖（纯 Python 标准库）。
+＋ 台账规范 ＋ 17 个脚本。零第三方依赖（纯 Python 标准库）。
 
 **30 秒试跑**（隔离目录，不碰你的数据）：
 
@@ -26,6 +26,12 @@ npx skills add yangclaw2026-png/a-share-ledger-workflow             # skills.sh 
 
 **开始管自己的数据**：`export STOCK_DATA_DIR=~/stock_data && bash init.sh`
 
+维护者本地发布 ClawHub 新版本（需 `clawhub login`，会从已提交的 `main` 构建）：
+
+```bash
+bash publish.sh
+```
+
 > ⚠️ 本仓库是**流程与工具**，不含任何持仓/标的/token。投资有风险，
 > 流程只保证"证据可追溯、判定可重算"，不保证收益。详见 `DISCLAIMER.md`。
 
@@ -33,7 +39,7 @@ npx skills add yangclaw2026-png/a-share-ledger-workflow             # skills.sh 
 
 An 8-step A-share (China mainland equity) research workflow for AI agents:
 direction → industry → value chain → screening → tracking → pre-buy gate →
-position ledger → post-trade review, plus a ledger standard and 15 stdlib-only
+position ledger → post-trade review, plus a ledger standard and 17 stdlib-only
 Python scripts. No third-party dependencies, no data, no tokens — you point it
 at your own `$STOCK_DATA_DIR`.
 
