@@ -11,7 +11,7 @@
 
 ```bash
 git clone https://github.com/yangclaw2026-png/a-share-ledger-workflow && cd a-share-ledger-workflow
-./demo.sh
+bash demo.sh
 ```
 
 预期：模板自检 9/9 通过、`rc=0`，另有两项「环境未配置」的跳过提示（新用户本就如此）。
@@ -24,7 +24,7 @@ hermes skills install a-share-ledger-workflow                       # Hermes
 npx skills add yangclaw2026-png/a-share-ledger-workflow             # skills.sh / Claude Code / Cursor
 ```
 
-**开始管自己的数据**：`export STOCK_DATA_DIR=~/stock_data && ./init.sh`
+**开始管自己的数据**：`export STOCK_DATA_DIR=~/stock_data && bash init.sh`
 
 > ⚠️ 本仓库是**流程与工具**，不含任何持仓/标的/token。投资有风险，
 > 流程只保证"证据可追溯、判定可重算"，不保证收益。详见 `DISCLAIMER.md`。
@@ -39,8 +39,8 @@ at your own `$STOCK_DATA_DIR`.
 
 ```bash
 git clone https://github.com/yangclaw2026-png/a-share-ledger-workflow && cd a-share-ledger-workflow
-./demo.sh                     # runs the bundled sample in a temp dir
-export STOCK_DATA_DIR=~/stock_data && ./init.sh   # scaffold your own data dir
+bash demo.sh                     # runs the bundled sample in a temp dir
+export STOCK_DATA_DIR=~/stock_data && bash init.sh   # scaffold your own data dir
 ```
 
 Install: `hermes skills install a-share-ledger-workflow` ·
@@ -57,7 +57,7 @@ stocks for you, and makes no return claims. See `DISCLAIMER.md`.
 ```bash
 # ① 初始化数据目录（骨架 + 模板，不覆盖已有文件）
 export STOCK_DATA_DIR="$HOME/stock_data"
-./init.sh
+bash init.sh
 
 # ② 填门槛数据：bench.json 已由 init.sh 拷好，按你的标的改 7 项字段
 #    字段说明见 templates/bench.example.json 顶部注释
@@ -66,7 +66,7 @@ export STOCK_DATA_DIR="$HOME/stock_data"
 python3 scripts/validate_ledgers.py
 
 # ④ 跑通示例（隔离目录，不碰你的真实数据；含破坏测试）
-./demo.sh
+bash demo.sh
 # 破坏测试步骤见 examples/sample_direction/README.md
 ```
 
@@ -174,8 +174,8 @@ python3 -c "import sys; print(sys.version)"
 
 # ⑤ 数据目录 + 示例验证
 export STOCK_DATA_DIR="$HOME/stock_data"
-./init.sh        # 建目录骨架 + 拷模板（不覆盖已有文件）
-./demo.sh        # 隔离目录跑通示例，预期 rc=0 + 2 项跳过提示
+bash init.sh        # 建目录骨架 + 拷模板（不覆盖已有文件）
+bash demo.sh        # 隔离目录跑通示例，预期 rc=0 + 2 项跳过提示
 ```
 
 外部脚本（可选依赖，不装则对应功能跳过，不报错）：
